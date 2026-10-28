@@ -1,0 +1,23 @@
+[ VolumetricFog3D / 体积雾（3D） / Volumetric Fog (3D) — v2.05 ]
+
+面向 AviUtl ExEdit2 的真·3D 连续体积雾自定义物件（v2.05）。
+GPU 实时积分 4 阶三维分形噪声（3D fBm）× Beer-Lambert 透射 × Henyey-Greenstein 前向散射，
+切片作为真 3D 多边形绘制、与 AviUtl2 硬件深度缓冲咬合——手前清晰、远处渐入深雾，
+自动获得正确的三维遮挡关系；预览编辑视点自动切换 360° 球体体积模式。
+v2.05：脚本识别名由「体積霧（3D）」更名为 VolumetricFog3D（UI 显示名仍由语言包本地化）。
+
+THE REAL 3D continuous volumetric fog custom object (v2.05) for AviUtl ExEdit2.
+GPU-integrated 4-octave 3D fBm noise, Beer-Lambert transmittance and
+Henyey-Greenstein forward scattering; slices render as true 3D polygons that
+interlock with the hardware depth buffer for automatic, physically correct 3D
+occlusion. The preview editor viewpoint switches to a 360-degree spherical
+volume automatically. v2.05: script identifier renamed to VolumetricFog3D.
+
+AviUtl ExEdit2 用「真・3D」連続ボリュームフォグ（v2.05）。
+4 オクターブ 3D fBm・Beer-Lambert 透過率・Henyey-Greenstein 前方散乱を GPU で
+リアルタイム積分し、スライスを真の 3D ポリゴンとして描画。ハードウェア深度
+バッファと噛み合う自動 3D 遮蔽と、編集視点の 360° 球体モードを搭載。
+v2.05：スクリプト識別名を VolumetricFog3D へ変更。
+
+作者 / 作者 / Authors: 南宮若馨Cylna (Cylna Nangong) & Arena.ai Agent
+反馈 / 報告 / Feedback: GitHub Issues 或 Discord「AviUtl2の情報が知りたいだろって‼」@nangongerregtcylna
