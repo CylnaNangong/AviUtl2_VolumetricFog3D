@@ -1,11 +1,11 @@
 ;===============================================================
-; Target: VolumetricFog3D v2.05 (VolumetricFog3D.obj2)
+; Target: VolumetricFog3D v2.06 (VolumetricFog3D.obj2)
 ; Language: 简体中文 (Simplified Chinese)
 ; Place this file in  C:\ProgramData\aviutl2\Language\\
 ;===============================================================
 
 [Language]
-Information=VolumetricFog3D v2.05 简体中文语言包
+Information=VolumetricFog3D v2.06 简体中文语言包
 SubLanguage=简体中文
 
 [Effect]
@@ -44,6 +44,9 @@ VolumetricFog3D=体积雾（3D）
 光の向きX=光线方向X
 光の向きY=光线方向Y
 光の向きZ=光线方向Z
+散射光来源=散射光来源
+手动方向=手动方向
+体积光联动=联动 VolumetricLight3D
 
 ; --- 描画 -> 渲染与显示 ---
 描画=渲染与显示
@@ -80,6 +83,9 @@ effect.name=真正的连续 3D 体积雾自定义物件（GPU 4 层 fBm 连续�
 光の向きX=散射光方向向量的 X 分量。
 光の向きY=散射光方向向量的 Y 分量。
 光の向きZ=散射光方向向量的 Z 分量。
+散射光来源=选择手动散射方向，或读取当前场景的 VolumetricLight3D 共享光场。联动模式依据局部光色、真实光束方向及投射阴影计算雾中散射；没有可用光场时自动回退到手动模式。
+手动方向=使用下方 X/Y/Z 参数指定固定散射方向。
+体积光联动=自动采样当前场景 VolumetricLight3D 的光场、局部颜色与阴影。建议把体积光图层放在本雾层之前以获得同帧更新。
 スライス数=沿纵深积分的 3D 连续密度层数（8〜64，默认 48 层顺滑无断层）。
 テクスチャ品質=GPU 体积图集单层分辨率（标准 2048 图集更细腻，轻量 1024 图集极速省显存）。
 視点追従=自动模式：摄像机视角使用视锥切片，切换至编辑视角（绿相机图标）时自动转为 3D 球体体积，任意环绕绝无平面穿帮！
