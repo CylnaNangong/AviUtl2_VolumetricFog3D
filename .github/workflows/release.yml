@@ -1,0 +1,98 @@
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build & upload .au2pkg.zip assets for (leave blank for latest release, e.g. v2.06)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  upload-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${EVENT_TAG:-}}"
+          if [ -z "${TAG}" ]; then
+            TAG="$(gh release view --repo "${REPO}" --json tagName --jq .tagName)"
+          fi
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+([.0-9a-zA-Z_-]*)$ ]]; then
+            echo "::error::Invalid release tag '${TAG}' (expected format like v2.06)"
+            exit 1
+          fi
+          echo "Resolved release tag: ${TAG}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout tagged release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build VolumetricFog3D .au2pkg.zip packages
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 packaging/build_au2pkg.py --out-dir dist
+
+          FULL_ZIP="dist/VolumetricFog3D-${TAG}.au2pkg.zip"
+          SCRIPT_ZIP="dist/VolumetricFog3D-${TAG}-ScriptOnly.au2pkg.zip"
+          for f in "${FULL_ZIP}" "${SCRIPT_ZIP}"; do
+            if [ ! -f "${f}" ]; then
+              echo "::error::Expected package '${f}' was not produced (check VERSION in packaging/build_au2pkg.py)"
+              ls -la dist/
+              exit 1
+            fi
+          done
+
+          {
+            echo "### 📦 Built Release Packages (\`${TAG}\`)"
+            echo ""
+            echo "| File | Size (bytes) | SHA-256 |"
+            echo "| :--- | ---: | :--- |"
+            for f in dist/*.au2pkg.zip; do
+              bn="$(basename "${f}")"
+              sz="$(wc -c < "${f}" | tr -d ' ')"
+              sha="$(sha256sum "${f}" | awk '{print $1}')"
+              echo "| \`${bn}\` | ${sz} | \`${sha}\` |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+          sha256sum dist/*.au2pkg.zip
+
+      - name: Upload .au2pkg.zip assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" \
+            dist/*.au2pkg.zip \
+            --repo "${REPO}" \
+            --clobber
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: VolumetricFog3D-${{ steps.meta.outputs.tag }}-au2pkg
+          path: dist/*.au2pkg.zip
+          if-no-files-found: error
