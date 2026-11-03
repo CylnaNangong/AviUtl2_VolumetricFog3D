@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 Builds AviUtl ExEdit2 drag-and-drop installation packages (*.au2pkg.zip) for VolumetricFog3D.
-  1. VolumetricFog3D-v2.05.au2pkg.zip             (Full Edition: Script + VL3DBridge Plugin + Languages)
-  2. VolumetricFog3D-v2.05-ScriptOnly.au2pkg.zip  (Pure Script Edition: Script + Languages)
+  1. VolumetricFog3D-v2.06.au2pkg.zip             (Full Edition: Script + VL3DBridge Plugin + Languages)
+  2. VolumetricFog3D-v2.06-ScriptOnly.au2pkg.zip  (Pure Script Edition: Script + Languages)
 """
 import argparse
 import zipfile
 from pathlib import Path
 
-VERSION = "v2.05"
+VERSION = "v2.06"
 SCRIPT_NAME = "VolumetricFog3D.obj2"
 LANG_SUFFIX = ".VolumetricFog3D.aul2"
 
@@ -41,7 +41,13 @@ def build_package(repo_root: Path, out_zip: Path, include_plugin: bool = True) -
     ]
 
     if include_plugin:
-        entries.append(("Plugin/VL3DBridge.aux2", (repo_root / "Plugin/VL3DBridge.aux2").read_bytes()))
+        bridge_binary = repo_root / "Plugin" / "VL3DBridge.aux2"
+        if not bridge_binary.is_file():
+            # The companion integration lives inside the VolumetricLight3D repository;
+            # reuse its canonical bridge binary instead of checking in a duplicate.
+            main_repo = Path(__file__).resolve().parents[3]
+            bridge_binary = main_repo / "Plugin" / "VL3DBridge.aux2"
+        entries.append(("Plugin/VL3DBridge.aux2", bridge_binary.read_bytes()))
         entries.append(("Plugin/VL3DBridge.ini", to_crlf((repo_root / "Plugin/VL3DBridge.ini").read_bytes())))
 
     for aul in sorted((repo_root / "Language").glob(f"*{LANG_SUFFIX}")):

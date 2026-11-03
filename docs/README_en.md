@@ -1,6 +1,6 @@
 # VolumetricFog3D / Volumetric Fog (3D) / 体积雾（3D）
 
-`VolumetricFog3D.obj2 v2.05` &nbsp;|&nbsp; `VL3DBridge.aux2 v1.21` (optional) &nbsp;|&nbsp; `AviUtl ExEdit2 v2.1.15+` &nbsp;|&nbsp; `MIT License`
+`VolumetricFog3D.obj2 v2.06` &nbsp;|&nbsp; `VL3DBridge.aux2 v1.22` (optional) &nbsp;|&nbsp; `AviUtl ExEdit2 v2.1.15+` &nbsp;|&nbsp; `MIT License`
 
 [简体中文](../README.md) | [日本語](README_ja.md)
 
@@ -19,17 +19,19 @@ Generates a **continuous 3D atmospheric fog volume** directly inside AviUtl2's 3
 
 > 📜 **v2.05 change**: the script's identifier was renamed from 「体積霧（3D）」 to **`VolumetricFog3D`** (UI display names remain localized by language packs). Re-add the object in existing projects, or keep the old script installed side-by-side. `Volumetric Light (3D)` v3.07+ recognizes both names automatically.
 
+> ✨ **v2.06 shared-light-field mode**: select “Link to VolumetricLight3D” under Scattering Light Source to sample local beam colour, travel direction, and projected shadows from `VL3DLF v3`. Manual direction remains the default; without a fresh field the effect falls back to manual scattering. A 4×4 per-slice field is bilinearly reconstructed to avoid blocky sample boundaries. The link requires VolumetricLight3D v3.16 or newer in the same scene.
+
 ## 2. System Requirements
 
 | Item | Requirement |
 |---|---|
 | Host | AviUtl ExEdit2 `v2.1.15` or newer (by KEN-kun; install separately) |
 | OS | Windows (Direct3D 11) |
-| Optional | `VL3DBridge.aux2 v1.21` (editor-view acceleration) |
+| Optional | `VL3DBridge.aux2 v1.22` (editor-view acceleration); VolumetricLight3D v3.16+ for shared-field scattering |
 
 ## 3. Installation (`.au2pkg.zip` Drag-and-Drop Supported)
 
-1. Download **`VolumetricFog3D-v2.05.au2pkg.zip`** (full edition, with optional GPU plugin) or **`VolumetricFog3D-v2.05-ScriptOnly.au2pkg.zip`**;
+1. Download **`VolumetricFog3D-v2.06.au2pkg.zip`** (full edition, with optional GPU plugin) or **`VolumetricFog3D-v2.06-ScriptOnly.au2pkg.zip`**;
 2. **Drag the zip onto the AviUtl2 window** — done (official drag-and-drop package format);
 3. Manual: place `Script/VolumetricFog3D.obj2` and `Language/*.aul2` into `C:\ProgramData\aviutl2\Script\` and `C:\ProgramData\aviutl2\Language\`.
 
@@ -37,7 +39,7 @@ Generates a **continuous 3D atmospheric fog volume** directly inside AviUtl2's 3
 
 1. Add the **VolumetricFog3D** custom object on any layer (between background and subjects is recommended);
 2. With a Camera Control object present it renders in true 3D perspective; the preview's editor viewpoint automatically engages sphere mode;
-3. Tune 「濃さ (Density)」 and fog color; raise 「散乱の強さ (Scattering)」 with a light direction for backlit atmospherics.
+3. Tune 「濃さ (Density)」 and fog color. Choose Manual Direction for the original controls, or Link to VolumetricLight3D for local beam colour, direction, and shadow-aware scattering.
 
 ## 5. Complete Parameter Reference (Click to Expand)
 
@@ -74,7 +76,7 @@ Generates a **continuous 3D atmospheric fog volume** directly inside AviUtl2's 3
 
 ## 8. Reporting Bugs
 
-- **[GitHub Issues](../../issues) is the best channel!** Please include the script version (enable 「ログに出力」 to see `VolumetricFog3D v2.05 ...`), your AviUtl ExEdit2 version, reproduction steps, and screenshots.
+- **[GitHub Issues](../../issues) is the best channel!** Please include the script version (enable 「ログに出力」 to see `VolumetricFog3D v2.06 ...`), your AviUtl ExEdit2 version, reproduction steps, and screenshots.
 - **Discord**: join the Japanese AviUtl2 community **「AviUtl2の情報が知りたいだろって‼」** ([invite](https://discord.gg/8qzmGY5NgQ)) and ping **南宫若馨Cylna** (`@nangongerregtcylna`, the author)!
 
 ## 9. Authors, Acknowledgements & License

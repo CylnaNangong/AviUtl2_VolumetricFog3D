@@ -1,6 +1,6 @@
 # VolumetricFog3D / 体積霧（3D） / 体积雾（3D）
 
-`VolumetricFog3D.obj2 v2.05` &nbsp;|&nbsp; `VL3DBridge.aux2 v1.21`（任意） &nbsp;|&nbsp; `AviUtl ExEdit2 v2.1.15+` &nbsp;|&nbsp; `MIT License`
+`VolumetricFog3D.obj2 v2.06` &nbsp;|&nbsp; `VL3DBridge.aux2 v1.22`（任意） &nbsp;|&nbsp; `AviUtl ExEdit2 v2.1.15+` &nbsp;|&nbsp; `MIT License`
 
 [简体中文](../README.md) | [English](README_en.md)
 
@@ -19,17 +19,19 @@ AviUtl2 の 3D カメラ空間にそのまま**連続的な大気フォグ場**�
 
 > 📜 **v2.05 変更**：スクリプト識別名を「体積霧（3D）」から **`VolumetricFog3D`** へ変更（UI 表示名は言語パックで従来どおりローカライズ）。既存プロジェクトは本 v2.05 を追加し直すか旧バージョンと併置してください。「体積光（3D）」v3.07+ は新旧両名称を自動認識します。
 
+> ✨ **v2.06 共有光場モード**：「散乱光源」で「VolumetricLight3D と連携」を選ぶと、`VL3DLF v3` から局所光色・光線方向・投影影を読み込みます。手動方向が既定で、新しい光場がない場合は手動散乱へ戻ります。各スライスの 4×4 光場サンプルを双線形補間し、ブロック状の境界を抑えます。同一シーン内に VolumetricLight3D v3.16 以降が必要です。
+
 ## 2. 動作環境
 
 | 項目 | 要件 |
 |---|---|
 | 本体 | AviUtl ExEdit2 `v2.1.15` 以上（ＫＥＮくん公式・別途入手） |
 | OS | Windows（Direct3D 11） |
-| 任意 | `VL3DBridge.aux2 v1.21`（編集視点同期の高速化） |
+| 任意 | `VL3DBridge.aux2 v1.22`（編集視点同期の高速化）、共有光場散乱には VolumetricLight3D v3.16 以降 |
 
 ## 3. 導入方法（`.au2pkg.zip` D&D 対応）
 
-1. **`VolumetricFog3D-v2.05.au2pkg.zip`**（フル版）または **`VolumetricFog3D-v2.05-ScriptOnly.au2pkg.zip`**（スクリプト単体版）をダウンロード；
+1. **`VolumetricFog3D-v2.06.au2pkg.zip`**（フル版）または **`VolumetricFog3D-v2.06-ScriptOnly.au2pkg.zip`**（スクリプト単体版）をダウンロード；
 2. zip を **AviUtl2 ウィンドウにドラッグ**するだけで導入完了（公式 D&D 形式）；
 3. 手動導入：`Script/VolumetricFog3D.obj2` と `Language/*.aul2` をそれぞれ `C:\ProgramData\aviutl2\Script\`・`Language\` へ。
 
@@ -37,7 +39,7 @@ AviUtl2 の 3D カメラ空間にそのまま**連続的な大気フォグ場**�
 
 1. 任意のレイヤーに「**VolumetricFog3D**」カスタムオブジェクトを追加（背景と人物の間が推奨）；
 2. シーンに「カメラ制御」があれば 3D 視点で自動レンダリング。編集用視点では球体モードへ自動切替；
-3. 「濃さ」「霧の色」を調整。逆光感を出すなら「散乱の強さ」を上げ、光の向きと色を設定。
+3. 「濃さ」「霧の色」を調整。「手動方向」は従来の X/Y/Z 指定、「VolumetricLight3D と連携」は局所光色・光線方向・投影影に沿った散乱です。
 
 ## 5. パラメータ詳細（クリックで展開）
 
@@ -74,7 +76,7 @@ AviUtl2 の 3D カメラ空間にそのまま**連続的な大気フォグ場**�
 
 ## 8. バグ報告・フィードバック
 
-- **[GitHub Issues](../../issues) が一番確実！**：スクリプト版数（「ログに出力」ON で `VolumetricFog3D v2.05 ...` 表示）・AviUtl ExEdit2 版数・再現手順・スクリーンショットを添えてください。
+- **[GitHub Issues](../../issues) が一番確実！**：スクリプト版数（「ログに出力」ON で `VolumetricFog3D v2.06 ...` 表示）・AviUtl ExEdit2 版数・再現手順・スクリーンショットを添えてください。
 - **Discord**：日本語 AviUtl2 情報共有サーバー **「AviUtl2の情報が知りたいだろって‼」**（[参加](https://discord.gg/8qzmGY5NgQ)）で **南宫若馨Cylna**（`@nangongerregtcylna`／作者本人）まで！
 
 ## 9. 作者・謝辞・ライセンス

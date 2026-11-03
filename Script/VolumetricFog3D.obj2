@@ -1,4 +1,4 @@
---information:VolumetricFog3D v2.05
+--information:VolumetricFog3D v2.06
 --
 -- 3D 空間に「霧」を描くカスタムオブジェクト（GPU 3D FBM アトラス ＋ ハードウェア Z バッファ体積法）。
 --
@@ -10,6 +10,12 @@
 --   ・プレビューの「編集用視点（緑のカメラアイコン）」を検出（camera_mode == 2）し、
 --     注視点を中心とする 3D 球体ボリュームへ自動切替するため、
 --     横や斜めへ自由に回り込んでも「謎の縦縞・断面の角」が出ない
+--
+-- v2.06 更新点（VL3DLF v3 体積光連携）:
+--   ・散乱光源に「手動方向 / 体積光連携」を追加。既定の手動方向は従来どおり。
+--   ・連携モードは同一シーンの VolumetricLight3D 光場を読み、4×4×最大64スライスの
+--     空間サンプルごとに局所放射輝度・光方向・投射陰影を反映して Henyey-Greenstein 散乱を計算。
+--   ・光場が未登録/古い/読めないとき自動で手動方向へ戻り、ゼロ光源や時間軸シークで残光しない。
 --
 -- v2.05 更新点（2026-10-24・スクリプト名称を「VolumetricFog3D」へ変更）:
 --   ・スクリプト識別名を「体積霧（3D）」から「VolumetricFog3D」へ変更（--information・ファイル名・
@@ -69,6 +75,7 @@
 --track@light_x:光の向きX,-1,1,0,0.01
 --track@light_y:光の向きY,-1,1,0.25,0.01
 --track@light_z:光の向きZ,-1,1,-1,0.01
+--select@scatter_source:散射光来源=0,手动方向=0,体积光联动=1
 --group
 
 --group:描画,true
@@ -94,7 +101,9 @@
         float4 p8;  // xyz: light_dir, w: hg_g
         float4 p9;  // xyz: light_rgb_scaled, w: h_fall_k
         float4 p10; // x: height_y, y: inner_u, z: jitter_k, w: cam_dist_y
-        float4 p11; // xyz: cam_pos, w: unused
+        float4 p11; // xyz: cam_pos, w: shared light-field mode
+        float4 lf_col[1024]; // 64 slices x 4 x 4 spatial light samples
+        float4 lf_dir[1024]; // per-sample weighted light travel direction
     };
 
     float hash31(float3 ip)
@@ -224,7 +233,53 @@
         // 高 g 時の極端な白飛び・色環断層を滑らかに抑制
         phase = phase / (1.0 + 0.08 * max(phase - 1.0, 0.0));
 
-        float3 scol = saturate(p6.xyz + p9.xyz * phase);
+        float3 light_add = p9.xyz * phase;
+        if (p11.w > 0.5)
+        {
+            float gx_f = saturate((pos.x - tx * tile_sz - pad_px) / span);
+            float gy_f = saturate((pos.y - ty * tile_sz - pad_px) / span);
+            // Bilinearly reconstruct the 4x4 spatial field. Nearest-cell lookup made
+            // each coarse sample boundary visible as a rectangular patch in the fog.
+            float sx = gx_f * 4.0 - 0.5;
+            float sy = gy_f * 4.0 - 0.5;
+            float bx = floor(sx);
+            float by = floor(sy);
+            float fx = sx - bx;
+            float fy = sy - by;
+            int x0 = (int)clamp(bx, 0.0, 3.0);
+            int x1 = (int)clamp(bx + 1.0, 0.0, 3.0);
+            int y0 = (int)clamp(by, 0.0, 3.0);
+            int y1 = (int)clamp(by + 1.0, 0.0, 3.0);
+            int base_i = (int)si * 16;
+            int i00 = base_i + y0 * 4 + x0;
+            int i10 = base_i + y0 * 4 + x1;
+            int i01 = base_i + y1 * 4 + x0;
+            int i11 = base_i + y1 * 4 + x1;
+            float4 c00 = lf_col[i00];
+            float4 c10 = lf_col[i10];
+            float4 c01 = lf_col[i01];
+            float4 c11 = lf_col[i11];
+            float4 lf_c = lerp(lerp(c00, c10, fx), lerp(c01, c11, fx), fy);
+            float3 d00 = lf_dir[i00].xyz * c00.w;
+            float3 d10 = lf_dir[i10].xyz * c10.w;
+            float3 d01 = lf_dir[i01].xyz * c01.w;
+            float3 d11 = lf_dir[i11].xyz * c11.w;
+            float3 lf_d = lerp(lerp(d00, d10, fx), lerp(d01, d11, fx), fy);
+            if (lf_c.w > 1e-5 && dot(lf_d, lf_d) > 1e-6)
+            {
+                float3 ldir = normalize(lf_d);
+                float cos_l = -dot(vdir, ldir);
+                float den_l = max(1.0 + g2 - 2.0 * g * cos_l, 1e-4);
+                float phase_l = (1.0 - g2) / (den_l * sqrt(den_l));
+                phase_l = phase_l / (1.0 + 0.08 * max(phase_l - 1.0, 0.0));
+                light_add = lf_c.rgb * phase_l;
+            }
+            else
+            {
+                light_add = 0.0;
+            }
+        }
+        float3 scol = saturate(p6.xyz + light_add);
         return float4(scol * alpha, alpha);
     }
 ]]
@@ -499,6 +554,7 @@ P.hg_g        = hg_g or 0.45
 P.light_x     = light_x or 0
 P.light_y     = light_y or 0.25
 P.light_z     = light_z or -1
+P.scatter_source = tonumber(scatter_source) or 0
 P.slices      = slices or 48
 P.res_mode    = res_mode
 if P.res_mode == nil then P.res_mode = 1 end
@@ -506,6 +562,644 @@ P.view_mode   = view_mode or 0
 P.depth_fade  = depth_fade or 25
 P.seed        = seed or 0
 P.log_mode    = as_bool(log_mode, true)
+
+local VFOG_LF = (function()
+    local M = {}
+    local MAGIC     = "VL3DLF\3\0"
+    local HDR_BYTES = 264
+    local GW        = 48
+    local RAD_BYTES = 48 * 48 * 4 -- 9216
+    local SH_BYTES  = 48 * 48 * 4 -- 9216
+    local CAM_BYTES = 48 * 18 * 4 -- 3456
+    local ok_ffi, ffi = pcall(require, "ffi")
+    if not ok_ffi then ffi = nil end
+
+    local function clamp(x, lo, hi)
+        if x < lo then return lo elseif x > hi then return hi end
+        return x
+    end
+
+    local function smoothstep(e0, e1, x)
+        local t = (x - e0) / math.max(e1 - e0, 1e-6)
+        if t <= 0.0 then return 0.0 elseif t >= 1.0 then return 1.0 end
+        return t * t * (3.0 - 2.0 * t)
+    end
+
+    local function hash3(ix, iy, iz)
+        local h = math.sin(ix * 127.1 + iy * 311.7 + iz * 74.7) * 43758.5453
+        return h - math.floor(h)
+    end
+
+    local function vnoise3(x, y, z)
+        local ix, iy, iz = math.floor(x), math.floor(y), math.floor(z)
+        local fx, fy, fz = x - ix, y - iy, z - iz
+        local ux = fx * fx * (3.0 - 2.0 * fx)
+        local uy = fy * fy * (3.0 - 2.0 * fy)
+        local uz = fz * fz * (3.0 - 2.0 * fz)
+        local n000 = hash3(ix,     iy,     iz)
+        local n100 = hash3(ix + 1, iy,     iz)
+        local n010 = hash3(ix,     iy + 1, iz)
+        local n110 = hash3(ix + 1, iy + 1, iz)
+        local n001 = hash3(ix,     iy,     iz + 1)
+        local n101 = hash3(ix + 1, iy,     iz + 1)
+        local n011 = hash3(ix,     iy + 1, iz + 1)
+        local n111 = hash3(ix + 1, iy + 1, iz + 1)
+        local nx00 = n000 + (n100 - n000) * ux
+        local nx10 = n010 + (n110 - n010) * ux
+        local nx01 = n001 + (n101 - n001) * ux
+        local nx11 = n011 + (n111 - n011) * ux
+        local nxy0 = nx00 + (nx10 - nx00) * uy
+        local nxy1 = nx01 + (nx11 - nx01) * uy
+        return nxy0 + (nxy1 - nxy0) * uz
+    end
+
+    local function fbm3(x, y, z)
+        local v1 = vnoise3(x, y, z)
+        local v2 = vnoise3(x * 2.03 + 17.1, y * 2.03 + 31.7, z * 2.03 + 47.3)
+        return v1 * 0.6667 + v2 * 0.3333
+    end
+
+    local function unpack_i32_le(s, pos)
+        local b0, b1, b2, b3 = s:byte(pos, pos + 3)
+        local u = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+        if u >= 2147483648 then u = u - 4294967296 end
+        return u
+    end
+
+    local function unpack_f32_le(s, pos)
+        local b0, b1, b2, b3 = s:byte(pos, pos + 3)
+        local sign = (b3 >= 128) and -1.0 or 1.0
+        local exp = (b3 % 128) * 2 + math.floor(b2 / 128)
+        local mant = (b2 % 128) * 65536 + b1 * 256 + b0
+        if exp == 0 then
+            if mant == 0 then return 0.0 end
+            return sign * math.ldexp(mant / 8388608.0, -126)
+        elseif exp == 255 then
+            return 0.0
+        end
+        return sign * math.ldexp(1.0 + mant / 8388608.0, exp - 127)
+    end
+
+    function M.scene_id()
+        if type(obj.scene_id) == "number" then
+            return math.floor(obj.scene_id + 0.5)
+        end
+        return 0
+    end
+
+    function M.scene_frame()
+        local f = (type(obj.frame) == "number") and math.floor(obj.frame + 0.5) or 0
+        local fs = (type(obj.frame_s) == "number") and math.floor(obj.frame_s + 0.5) or nil
+        if fs == nil and type(obj.getvalue) == "function" then
+            local ok_fs, v_fs = pcall(obj.getvalue, "frame_s")
+            if ok_fs and type(v_fs) == "number" then fs = math.floor(v_fs + 0.5) end
+        end
+        local sf = (fs or 0) + f
+        local fe = (type(obj.frame_e) == "number") and math.floor(obj.frame_e + 0.5) or nil
+        if fe ~= nil and fs ~= nil and fe >= fs and sf > fe then
+            sf = fe
+        end
+        return sf
+    end
+
+    function M.make_xform(ozm, ox0, oy0, oz0)
+        local sx = ozm * ((type(obj.sx) == "number") and obj.sx or 1.0)
+        local sy = ozm * ((type(obj.sy) == "number") and obj.sy or 1.0)
+        local sz = ozm * ((type(obj.sz) == "number") and obj.sz or 1.0)
+        local asp = (type(obj.aspect) == "number") and obj.aspect or 0.0
+        if asp > 1e-6 then
+            sy = sy * math.max(0.0, 1.0 - asp)
+        elseif asp < -1e-6 then
+            sx = sx * math.max(0.0, 1.0 + asp)
+        end
+        local cx = (type(obj.cx) == "number") and obj.cx or 0.0
+        local cy = (type(obj.cy) == "number") and obj.cy or 0.0
+        local cz = (type(obj.cz) == "number") and obj.cz or 0.0
+        local rx = (type(obj.rx) == "number") and obj.rx or 0.0
+        local ry = (type(obj.ry) == "number") and obj.ry or 0.0
+        local rz = (type(obj.rz) == "number") and obj.rz or 0.0
+        local tx = ox0 + ((type(obj.ox) == "number") and obj.ox or 0.0)
+        local ty = oy0 + ((type(obj.oy) == "number") and obj.oy or 0.0)
+        local tz = oz0 + ((type(obj.oz) == "number") and obj.oz or 0.0)
+        local has_rot = (math.abs(rx) + math.abs(ry) + math.abs(rz)) > 1e-5
+        local has_off = (math.abs(cx) + math.abs(cy) + math.abs(cz)) > 1e-5
+            or math.abs(sx - ozm) > 1e-6 or math.abs(sy - ozm) > 1e-6 or math.abs(sz - ozm) > 1e-6
+            or math.abs(tx - ox0) > 1e-6 or math.abs(ty - oy0) > 1e-6 or math.abs(tz - oz0) > 1e-6
+        if not has_rot and not has_off then
+            return { fast = true, ozm = ozm, tx = tx, ty = ty, tz = tz }
+        end
+        local d2r = math.pi / 180.0
+        local ax, ay, az = rx * d2r, ry * d2r, rz * d2r
+        local cxr, sxr = math.cos(ax), math.sin(ax)
+        local cyr, syr = math.cos(ay), math.sin(ay)
+        local czr, szr = math.cos(az), math.sin(az)
+        -- AviUtl2 rot_xyz (X -> Y -> Z):
+        -- v1 = Rx(v0), v2 = Ry(v1), v3 = Rz(v2)
+        return {
+            fast = false,
+            sx = sx, sy = sy, sz = sz,
+            cx = cx, cy = cy, cz = cz,
+            tx = tx, ty = ty, tz = tz,
+            m00 = cyr * czr,
+            m01 = sxr * syr * czr - cxr * szr,
+            m02 = cxr * syr * czr + sxr * szr,
+            m10 = cyr * szr,
+            m11 = sxr * syr * szr + cxr * czr,
+            m12 = cxr * syr * szr - sxr * czr,
+            m20 = -syr,
+            m21 = sxr * cyr,
+            m22 = cxr * cyr,
+        }
+    end
+
+    function M.to_world(xf, lx, ly, lz)
+        if xf.fast then
+            local z = xf.ozm
+            return lx * z + xf.tx, ly * z + xf.ty, lz * z + xf.tz
+        end
+        local x = (lx - xf.cx) * xf.sx
+        local y = (ly - xf.cy) * xf.sy
+        local z = (lz - xf.cz) * xf.sz
+        return x * xf.m00 + y * xf.m01 + z * xf.m02 + xf.tx,
+               x * xf.m10 + y * xf.m11 + z * xf.m12 + xf.ty,
+               x * xf.m20 + y * xf.m21 + z * xf.m22 + xf.tz
+    end
+
+    function M.world_vec_to_local(xf, wx, wy, wz)
+        if xf.fast then return wx, wy, wz end
+        return wx * xf.m00 + wy * xf.m10 + wz * xf.m20,
+               wx * xf.m01 + wy * xf.m11 + wz * xf.m21,
+               wx * xf.m02 + wy * xf.m12 + wz * xf.m22
+    end
+
+    local B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local B64_DEC_LUA = {}
+    for i = 1, #B64_CHARS do B64_DEC_LUA[B64_CHARS:byte(i)] = i - 1 end
+    local b64_dec_ffi = nil
+    if ffi ~= nil then
+        b64_dec_ffi = ffi.new("int16_t[256]")
+        for i = 0, 255 do b64_dec_ffi[i] = -1 end
+        for i = 1, #B64_CHARS do b64_dec_ffi[B64_CHARS:byte(i)] = i - 1 end
+    end
+
+    local function decode_b64(s, start_idx)
+        local n = #s - start_idx + 1
+        if n < 4 then return nil end
+        if ffi ~= nil and b64_dec_ffi ~= nil then
+            local max_out = math.floor(n / 4) * 3 + 4
+            local out = ffi.new("uint8_t[?]", max_out)
+            local sp = ffi.cast("const uint8_t*", s) + (start_idx - 1)
+            local lut = b64_dec_ffi
+            local si, di = 0, 0
+            while si + 3 < n do
+                local c0 = lut[sp[si]]
+                local c1 = lut[sp[si + 1]]
+                local b2 = sp[si + 2]
+                local b3 = sp[si + 3]
+                if c0 < 0 or c1 < 0 then break end
+                local c2 = (b2 == 61) and 0 or lut[b2]
+                local c3 = (b3 == 61) and 0 or lut[b3]
+                if c2 < 0 or c3 < 0 then break end
+                local v = c0 * 262144 + c1 * 4096 + c2 * 64 + c3
+                out[di] = math.floor(v / 65536) % 256
+                di = di + 1
+                if b2 ~= 61 then
+                    out[di] = math.floor(v / 256) % 256
+                    di = di + 1
+                    if b3 ~= 61 then
+                        out[di] = v % 256
+                        di = di + 1
+                    end
+                end
+                si = si + 4
+            end
+            return ffi.string(out, di)
+        end
+        local chunks = {}
+        local ci = 0
+        local i = start_idx
+        local len_s = #s
+        while i + 3 <= len_s do
+            local a0, a1, a2, a3 = s:byte(i, i + 3)
+            local c0, c1 = B64_DEC_LUA[a0], B64_DEC_LUA[a1]
+            if c0 == nil or c1 == nil then break end
+            local c2 = (a2 == 61) and 0 or B64_DEC_LUA[a2]
+            local c3 = (a3 == 61) and 0 or B64_DEC_LUA[a3]
+            if c2 == nil or c3 == nil then break end
+            local v = c0 * 262144 + c1 * 4096 + c2 * 64 + c3
+            local o0 = math.floor(v / 65536) % 256
+            if a2 == 61 then
+                ci = ci + 1; chunks[ci] = string.char(o0)
+            elseif a3 == 61 then
+                ci = ci + 1; chunks[ci] = string.char(o0, math.floor(v / 256) % 256)
+            else
+                ci = ci + 1; chunks[ci] = string.char(o0, math.floor(v / 256) % 256, v % 256)
+            end
+            i = i + 4
+        end
+        return table.concat(chunks)
+    end
+
+    local function decode_slot(raw_slot, want_sid, cur_frame)
+        if type(raw_slot) ~= "string" or #raw_slot < 16 then return nil end
+        local blob = raw_slot
+        if raw_slot:sub(1, 8) == "VL3DB64:" then
+            blob = decode_b64(raw_slot, 9)
+        end
+        if type(blob) ~= "string" or #blob < HDR_BYTES then return nil end
+        if blob:sub(1, 8) ~= MAGIC then return nil end
+        local iv, fv, u8_ptr
+        if ffi ~= nil then
+            u8_ptr = ffi.cast("const uint8_t*", blob)
+            local ip = ffi.cast("const int32_t*", u8_ptr + 8)
+            iv = {}
+            for i = 1, 8 do iv[i] = tonumber(ip[i - 1]) or 0 end
+        else
+            iv = {}
+            for i = 1, 8 do iv[i] = unpack_i32_le(blob, 9 + (i - 1) * 4) end
+        end
+
+        local sid = iv[1]
+        local sframe = iv[3]
+        if sid ~= want_sid then return nil end
+        if math.abs(cur_frame - sframe) > 1 then return nil end
+
+        local flags = iv[6]
+        local function has_bit(b) return (math.floor(flags / b) % 2) == 1 end
+        local has_rad = has_bit(1)
+        local has_sh  = has_bit(2)
+        local has_cam = has_bit(4)
+        local has_ext_cam = has_bit(512)
+        local hdr_b = has_ext_cam and 320 or HDR_BYTES
+        local n_flt = has_ext_cam and 70 or 56
+        local need_len = hdr_b
+            + (has_rad and RAD_BYTES or 0)
+            + (has_sh  and SH_BYTES  or 0)
+            + (has_cam and CAM_BYTES or 0)
+        if #blob < need_len then return nil end
+
+        if ffi ~= nil then
+            local fp = ffi.cast("const float*", u8_ptr + 40)
+            fv = {}
+            for i = 1, n_flt do fv[i] = tonumber(fp[i - 1]) or 0.0 end
+        else
+            fv = {}
+            for i = 1, n_flt do fv[i] = unpack_f32_le(blob, 41 + (i - 1) * 4) end
+        end
+
+        local off_rad = hdr_b
+        local off_sh  = off_rad + (has_rad and RAD_BYTES or 0)
+        local off_cam = off_sh  + (has_sh  and SH_BYTES  or 0)
+
+        return {
+            blob    = blob,
+            u8      = u8_ptr,
+            layer   = iv[2],
+            kind    = iv[5],
+            has_rad = has_rad,
+            has_sh  = has_sh,
+            has_cam = has_cam,
+            is_spot = has_bit(8),
+            fog_on  = has_bit(16),
+            occ3d_front_only = has_bit(32),
+            is_ortho_cam     = has_bit(64),
+            has_cam_3d_light = has_bit(128),
+            cam_light_is_pos = has_bit(256),
+            has_ext_cam      = has_ext_cam,
+            off_rad = off_rad,
+            off_sh  = off_sh,
+            off_cam = off_cam,
+            wx = fv[1], wy = fv[2], wz = fv[3],
+            Wrx = fv[4], Wry = fv[5], Wrz = fv[6],
+            Wdx = fv[7], Wdy = fv[8], Wdz = fv[9],
+            Wnx = fv[10], Wny = fv[11], Wnz = fv[12],
+            sx_p = fv[13], sy_p = fv[14], sz_p = fv[15],
+            inv_2Hx = fv[16], inv_2Hy = fv[17],
+            dS_wn = fv[18], u_wn = fv[19],
+            L_tot = fv[20], k_dec = fv[21], inv_end = fv[22],
+            u0_b = fv[23], u1_b = fv[24], v0_b = fv[25], v1_b = fv[26],
+            su0 = fv[27], su1 = fv[28], sv0 = fv[29], sv1 = fv[30],
+            gain_r = fv[31], gain_g = fv[32], gain_b = fv[33],
+            min_x = fv[34], min_y = fv[35], min_z = fv[36],
+            max_x = fv[37], max_y = fv[38], max_z = fv[39],
+            cl_px = fv[40], cl_py = fv[41], cl_pz = fv[42],
+            cl_dx = fv[43], cl_dy = fv[44], cl_dz = fv[45],
+            cos_in_sp = fv[46], cos_out_sp = fv[47], att_k_sp = fv[48],
+            cam_zmax = fv[49], z_win_cam = fv[50], sh_soft_t = fv[51],
+            fog_amt = fv[52], inv_fscale = fv[53],
+            wox = fv[54], woy = fv[55], woz = fv[56],
+            cam_x = has_ext_cam and fv[57] or 0.0,
+            cam_y = has_ext_cam and fv[58] or 0.0,
+            cam_z = has_ext_cam and fv[59] or -1024.0,
+            cam_fx = has_ext_cam and fv[60] or 0.0,
+            cam_fy = has_ext_cam and fv[61] or 0.0,
+            cam_fz = has_ext_cam and fv[62] or 1.0,
+            cam_rx = has_ext_cam and fv[63] or 1.0,
+            cam_ry = has_ext_cam and fv[64] or 0.0,
+            cam_rz = has_ext_cam and fv[65] or 0.0,
+            cam_dx = has_ext_cam and fv[66] or 0.0,
+            cam_dy = has_ext_cam and fv[67] or 1.0,
+            cam_dz = has_ext_cam and fv[68] or 0.0,
+            cam_focal = has_ext_cam and fv[69] or 1024.0,
+            host_unlit = has_ext_cam and fv[70] or 1.0,
+        }
+    end
+
+    function M.collect(enable)
+        if not enable then return {}, "OFF" end
+        if global == nil then return {}, "WAIT" end
+        local sid = M.scene_id()
+        local cur_f = M.scene_frame()
+        local idx_key = "VL3D_LF_IDX:" .. tostring(sid)
+        local ok_i, raw = pcall(function() return global[idx_key] end)
+        if not ok_i or raw == nil then return {}, "WAIT" end
+        if type(raw) ~= "string" or raw == "" then return {}, "IDLE" end
+        local out = {}
+        local seen = {}
+        for tok in raw:gmatch("(%d+)") do
+            local ln = tonumber(tok)
+            if ln ~= nil and ln > 0 and not seen[ln] then
+                seen[ln] = true
+                local sk = "VL3D_LF:" .. tostring(sid) .. ":" .. tostring(math.floor(ln))
+                local ok_b, blob = pcall(function() return global[sk] end)
+                if ok_b and type(blob) == "string" and #blob >= HDR_BYTES then
+                    local em = decode_slot(blob, sid, cur_f)
+                    if em ~= nil then out[#out + 1] = em end
+                end
+            end
+        end
+        return out, (#out > 0) and "ON" or "IDLE"
+    end
+
+    local function read_rgba01(em, base_off, w, h, ix, iy)
+        if ix < 0 then ix = 0 elseif ix >= w then ix = w - 1 end
+        if iy < 0 then iy = 0 elseif iy >= h then iy = h - 1 end
+        local off = base_off + (iy * w + ix) * 4
+        local r, g, b, a
+        if em.u8 ~= nil then
+            local p = em.u8
+            r, g, b, a = p[off], p[off + 1], p[off + 2], p[off + 3]
+        else
+            r, g, b, a = em.blob:byte(off + 1, off + 4)
+        end
+        local k = 1.0 / 255.0
+        return r * k, g * k, b * k, a * k
+    end
+
+    local function sample_rad_bilerp(em, nu, nv)
+        local fx = clamp(nu, 0.0, 1.0) * GW - 0.5
+        local fy = clamp(nv, 0.0, 1.0) * GW - 0.5
+        local x0 = math.floor(fx)
+        local y0 = math.floor(fy)
+        local tx = fx - x0
+        local ty = fy - y0
+        local r00, g00, b00, a00 = read_rgba01(em, em.off_rad, GW, GW, x0,     y0)
+        local r10, g10, b10, a10 = read_rgba01(em, em.off_rad, GW, GW, x0 + 1, y0)
+        local r01, g01, b01, a01 = read_rgba01(em, em.off_rad, GW, GW, x0,     y0 + 1)
+        local r11, g11, b11, a11 = read_rgba01(em, em.off_rad, GW, GW, x0 + 1, y0 + 1)
+        local w00 = (1.0 - tx) * (1.0 - ty)
+        local w10 = tx * (1.0 - ty)
+        local w01 = (1.0 - tx) * ty
+        local w11 = tx * ty
+        local pr = r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11
+        local pg = g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11
+        local pb = b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11
+        local pa = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11
+        return pr, pg, pb, pa
+    end
+
+    local function eval_sh_corner(em, ix, iy, t_ray)
+        local r01, g01, cov, av = read_rgba01(em, em.off_sh, GW, GW, ix, iy)
+        if av < 0.5 or cov <= 0.004 then return 1.0 end
+        local hi = math.floor(r01 * 255.0 + 0.5)
+        local lo = math.floor(g01 * 255.0 + 0.5)
+        local tocc = (hi * 256.0 + lo) * (1.0 / 65535.0) * em.L_tot
+        local soft = em.sh_soft_t
+        return 1.0 - cov * smoothstep(tocc - soft * 0.35, tocc + soft, t_ray)
+    end
+
+    local function sample_sh_vis(em, u, v, t_ray)
+        if u < em.su0 or u > em.su1 or v < em.sv0 or v > em.sv1 then return 1.0 end
+        local nu = (u - em.su0) / math.max(em.su1 - em.su0, 1e-5)
+        local nv = (v - em.sv0) / math.max(em.sv1 - em.sv0, 1e-5)
+        local fx = clamp(nu, 0.0, 1.0) * GW - 0.5
+        local fy = clamp(nv, 0.0, 1.0) * GW - 0.5
+        local x0 = math.floor(fx)
+        local y0 = math.floor(fy)
+        local tx = fx - x0
+        local ty = fy - y0
+        local v00 = eval_sh_corner(em, x0,     y0,     t_ray)
+        local v10 = eval_sh_corner(em, x0 + 1, y0,     t_ray)
+        local v01 = eval_sh_corner(em, x0,     y0 + 1, t_ray)
+        local v11 = eval_sh_corner(em, x0 + 1, y0 + 1, t_ray)
+        local vx0 = v00 + (v10 - v00) * tx
+        local vx1 = v01 + (v11 - v01) * tx
+        return vx0 + (vx1 - vx0) * ty
+    end
+
+    local function eval_cam_corner(em, ix, iy, zc_snow)
+        local r01, g01, cov, av = read_rgba01(em, em.off_cam, GW, 18, ix, iy)
+        if av < 0.5 or cov <= 0.004 then return 1.0 end
+        local hi = math.floor(r01 * 255.0 + 0.5)
+        local lo = math.floor(g01 * 255.0 + 0.5)
+        local z_fg = (hi * 256.0 + lo) * (1.0 / 65535.0) * em.cam_zmax
+        if em.occ3d_front_only and z_fg >= em.z_win_cam - 2.0 then
+            return 1.0
+        end
+        return 1.0 - cov * smoothstep(z_fg - 6.0, z_fg + 14.0, zc_snow)
+    end
+
+    local function sample_cam_vis(em, su, sv, zc_snow)
+        if su < 0.0 or su > 1.0 or sv < 0.0 or sv > 1.0 then return 1.0 end
+        local fx = su * GW - 0.5
+        local fy = sv * 18.0 - 0.5
+        local x0 = math.floor(fx)
+        local y0 = math.floor(fy)
+        local tx = fx - x0
+        local ty = fy - y0
+        local v00 = eval_cam_corner(em, x0,     y0,     zc_snow)
+        local v10 = eval_cam_corner(em, x0 + 1, y0,     zc_snow)
+        local v01 = eval_cam_corner(em, x0,     y0 + 1, zc_snow)
+        local v11 = eval_cam_corner(em, x0 + 1, y0 + 1, zc_snow)
+        local vx0 = v00 + (v10 - v00) * tx
+        local vx1 = v01 + (v11 - v01) * tx
+        return vx0 + (vx1 - vx0) * ty
+    end
+
+    function M.sample(emitters, wx, wy, wz, dx_c, dy_c, dz_c, zc_snow, r_x, r_y, r_z, u_x, u_y, u_z, focal_d, scr_w, scr_h)
+        local acc_r, acc_g, acc_b = 0.0, 0.0, 0.0
+        local acc_dx, acc_dy, acc_dz, acc_dw = 0.0, 0.0, 0.0, 0.0
+        local su_c, sv_c = nil, nil
+        for ei = 1, #emitters do
+            local em = emitters[ei]
+            if wx >= em.min_x and wx <= em.max_x
+                and wy >= em.min_y and wy <= em.max_y
+                and wz >= em.min_z and wz <= em.max_z then
+                local dwx, dwy, dwz = wx - em.wx, wy - em.wy, wz - em.wz
+                local d_wn = dwx * em.Wnx + dwy * em.Wny + dwz * em.Wnz
+                if d_wn < -2.0 then
+                    local spot_f = 1.0
+                    local ok_ray = true
+                    if em.is_spot then
+                        local vx, vy, vz = wx - em.cl_px, wy - em.cl_py, wz - em.cl_pz
+                        local ax = vx * em.cl_dx + vy * em.cl_dy + vz * em.cl_dz
+                        local d2 = vx * vx + vy * vy + vz * vz
+                        if ax <= 3.0 or d2 <= 1e-6 then
+                            ok_ray = false
+                        else
+                            local dist_sp = math.sqrt(d2)
+                            if dist_sp >= em.L_tot then
+                                ok_ray = false
+                            else
+                                local cos_sp = ax / dist_sp
+                                if cos_sp <= em.cos_out_sp then
+                                    ok_ray = false
+                                else
+                                    local dr = dist_sp * (1.0 / 800.0)
+                                    spot_f = smoothstep(em.cos_out_sp, em.cos_in_sp, cos_sp) / (1.0 + em.att_k_sp * dr * dr)
+                                end
+                            end
+                        end
+                    end
+
+                    if ok_ray then
+                        local qx, qy, qz, t_ray
+                        local g_div = 1.0
+                        if em.kind == 0 then
+                            t_ray = d_wn / em.u_wn
+                            if t_ray <= 0.0 or t_ray >= em.L_tot then
+                                ok_ray = false
+                            else
+                                qx = wx - em.sx_p * t_ray
+                                qy = wy - em.sy_p * t_ray
+                                qz = wz - em.sz_p * t_ray
+                            end
+                        elseif em.kind == 1 then
+                            local dvx, dvy, dvz = wx - em.sx_p, wy - em.sy_p, wz - em.sz_p
+                            local den = dvx * em.Wnx + dvy * em.Wny + dvz * em.Wnz
+                            if math.abs(den) <= 1e-4 then
+                                ok_ray = false
+                            else
+                                local alpha = em.dS_wn / den
+                                if alpha <= 0.0 or alpha >= 1.0 then
+                                    ok_ray = false
+                                else
+                                    local vlen = math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz)
+                                    t_ray = math.abs(1.0 - alpha) * vlen
+                                    if t_ray >= em.L_tot then
+                                        ok_ray = false
+                                    else
+                                        qx = em.sx_p + dvx * alpha
+                                        qy = em.sy_p + dvy * alpha
+                                        qz = em.sz_p + dvz * alpha
+                                    end
+                                end
+                            end
+                        else
+                            local dvx, dvy, dvz = wx - em.sx_p, wy - em.sy_p, wz - em.sz_p
+                            local den = dvx * em.Wnx + dvy * em.Wny + dvz * em.Wnz
+                            if math.abs(den) <= 1e-4 then
+                                ok_ray = false
+                            else
+                                local alpha = em.dS_wn / den
+                                if alpha >= 0.0 and alpha <= 1.0 then
+                                    ok_ray = false
+                                else
+                                    local vlen = math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz)
+                                    t_ray = math.abs(1.0 - alpha) * vlen
+                                    if t_ray >= em.L_tot then
+                                        ok_ray = false
+                                    else
+                                        qx = em.sx_p + dvx * alpha
+                                        qy = em.sy_p + dvy * alpha
+                                        qz = em.sz_p + dvz * alpha
+                                        local conc = math.min(9.0, math.max(1.0, math.abs(alpha)))
+                                        g_div = math.min(6.5, conc ^ 1.15)
+                                    end
+                                end
+                            end
+                        end
+
+                        if ok_ray then
+                            local dqx, dqy, dqz = qx - em.wx, qy - em.wy, qz - em.wz
+                            local u = 0.5 + (dqx * em.Wrx + dqy * em.Wry + dqz * em.Wrz) * em.inv_2Hx
+                            local v = 0.5 + (dqx * em.Wdx + dqy * em.Wdy + dqz * em.Wdz) * em.inv_2Hy
+                            if em.is_spot then
+                                u = clamp(u, 0.001, 0.999)
+                                v = clamp(v, 0.001, 0.999)
+                            elseif u < em.u0_b or u > em.u1_b or v < em.v0_b or v > em.v1_b then
+                                ok_ray = false
+                            end
+
+                            if ok_ray then
+                                local sr, sg, sb, sa = 1.0, 1.0, 1.0, 1.0
+                                if em.has_rad then
+                                    local nu = (u - em.u0_b) / math.max(em.u1_b - em.u0_b, 1e-5)
+                                    local nv = (v - em.v0_b) / math.max(em.v1_b - em.v0_b, 1e-5)
+                                    sr, sg, sb, sa = sample_rad_bilerp(em, nu, nv)
+                                end
+                                if sa > 0.004 then
+                                    local sh_vis = em.has_sh and sample_sh_vis(em, u, v, t_ray) or 1.0
+                                    if sh_vis > 0.004 then
+                                        local fg_vis = 1.0
+                                        if em.has_cam then
+                                            if su_c == nil then
+                                                local rx_c = dx_c * r_x + dy_c * r_y + dz_c * r_z
+                                                local dy_s = -(dx_c * u_x + dy_c * u_y + dz_c * u_z)
+                                                if em.is_ortho_cam then
+                                                    su_c = 0.5 + rx_c / scr_w
+                                                    sv_c = 0.5 + dy_s / scr_h
+                                                elseif zc_snow > 1.0 then
+                                                    local k_p = focal_d / zc_snow
+                                                    su_c = 0.5 + (rx_c * k_p) / scr_w
+                                                    sv_c = 0.5 + (dy_s * k_p) / scr_h
+                                                else
+                                                    su_c, sv_c = -1.0, -1.0
+                                                end
+                                            end
+                                            fg_vis = sample_cam_vis(em, su_c, sv_c, zc_snow)
+                                        end
+                                        if fg_vis > 0.004 then
+                                            local att = math.exp(-em.k_dec * t_ray) * smoothstep(0.0, 1.0, (em.L_tot - t_ray) * em.inv_end)
+                                            local fog_f = 1.0
+                                            if em.fog_on then
+                                                local n = fbm3((wx + em.wox) * em.inv_fscale, (wy + em.woy) * em.inv_fscale, (wz + em.woz) * em.inv_fscale)
+                                                fog_f = 1.0 + (smoothstep(0.16, 0.84, n) - 1.0) * em.fog_amt
+                                            end
+                                            local w_tot = g_div * spot_f * att * fog_f * sh_vis * fg_vis
+                                            local cr = sr * em.gain_r * w_tot
+                                            local cg = sg * em.gain_g * w_tot
+                                            local cb = sb * em.gain_b * w_tot
+                                            acc_r = acc_r + cr
+                                            acc_g = acc_g + cg
+                                            acc_b = acc_b + cb
+                                            local dx_l, dy_l, dz_l = wx - qx, wy - qy, wz - qz
+                                            local dl_l = math.sqrt(dx_l * dx_l + dy_l * dy_l + dz_l * dz_l)
+                                            if dl_l > 1e-5 then
+                                                local weight_l = math.max(cr, cg, cb)
+                                                acc_dx = acc_dx + dx_l * (weight_l / dl_l)
+                                                acc_dy = acc_dy + dy_l * (weight_l / dl_l)
+                                                acc_dz = acc_dz + dz_l * (weight_l / dl_l)
+                                                acc_dw = acc_dw + weight_l
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        local dl = math.sqrt(acc_dx * acc_dx + acc_dy * acc_dy + acc_dz * acc_dz)
+        if dl > 1e-6 then
+            return acc_r, acc_g, acc_b, acc_dx / dl, acc_dy / dl, acc_dz / dl, acc_dw
+        end
+        return acc_r, acc_g, acc_b, 0.0, 0.0, 0.0, 0.0
+    end
+
+    return M
+end)()
 
 local function fog_frame()
 
@@ -730,6 +1424,71 @@ local function fog_frame()
         cam_x, cam_y, cam_z, 0
     }
 
+    local lf_emitters, lf_state = {}, "OFF"
+    if P.scatter_source == 1 then lf_emitters, lf_state = VFOG_LF.collect(true) end
+    local lf_active = (P.scatter_source == 1 and #lf_emitters > 0)
+    consts[48] = lf_active and 1.0 or 0.0
+
+    local LF_GRID = 4
+    local LF_SAMPLES = 64 * LF_GRID * LF_GRID
+    local lf_colors, lf_dirs = {}, {}
+    if lf_active then
+        for si = 0, n_sl - 1 do
+            local z = start_s + (si + 0.5) * dz
+            local rad_s = 0.0
+            if use_sphere then
+                local sq = hw_k * hw_k - z * z
+                rad_s = sq > 0 and math.sqrt(sq) or 0.0
+                if rad_s < 200.0 then rad_s = 200.0 end
+            end
+            for gy = 0, LF_GRID - 1 do
+                for gx = 0, LF_GRID - 1 do
+                    local lu = ((gx + 0.5) / LF_GRID) * 2.0 - 1.0
+                    local lv = ((gy + 0.5) / LF_GRID) * 2.0 - 1.0
+                    local wx, wy, wz
+                    if use_sphere then
+                        local lx = lu * rad_s
+                        local ly = lv * rad_s * (hh_k / math.max(hw_k, 1.0))
+                        wx = orig_x + f_x * z + r_x * lx + d_x * ly
+                        wy = orig_y + f_y * z + r_y * lx + d_y * ly
+                        wz = orig_z + f_z * z + r_z * lx + d_z * ly
+                    else
+                        wx = orig_x + f_x * z + r_x * (lu * hw_k * z) + d_x * (lv * hh_k * z)
+                        wy = orig_y + f_y * z + r_y * (lu * hw_k * z) + d_y * (lv * hh_k * z)
+                        wz = orig_z + f_z * z + r_z * (lu * hw_k * z) + d_z * (lv * hh_k * z)
+                    end
+                    local dx_c, dy_c, dz_c = wx - cam_x, wy - cam_y, wz - cam_z
+                    local zc = dx_c * f_x + dy_c * f_y + dz_c * f_z
+                    local idx = si * LF_GRID * LF_GRID + gy * LF_GRID + gx + 1
+                    local ir, ig, ib, idirx, idiry, idirz, strength = VFOG_LF.sample(
+                        lf_emitters, wx, wy, wz,
+                        dx_c, dy_c, dz_c, zc,
+                        r_x, r_y, r_z, -d_x, -d_y, -d_z,
+                        focal_d, scr_w, scr_h
+                    )
+                    local cscale = scat_k
+                    lf_colors[idx] = { ir * cscale, ig * cscale, ib * cscale, strength }
+                    lf_dirs[idx] = { idirx, idiry, idirz, 0.0 }
+                end
+            end
+        end
+    end
+    local ci = #consts
+    for i = 1, LF_SAMPLES do
+        local c = lf_colors[i]
+        ci = ci + 1; consts[ci] = c ~= nil and c[1] or 0.0
+        ci = ci + 1; consts[ci] = c ~= nil and c[2] or 0.0
+        ci = ci + 1; consts[ci] = c ~= nil and c[3] or 0.0
+        ci = ci + 1; consts[ci] = c ~= nil and c[4] or 0.0
+    end
+    for i = 1, LF_SAMPLES do
+        local d = lf_dirs[i]
+        ci = ci + 1; consts[ci] = d ~= nil and d[1] or 0.0
+        ci = ci + 1; consts[ci] = d ~= nil and d[2] or 0.0
+        ci = ci + 1; consts[ci] = d ~= nil and d[3] or 0.0
+        ci = ci + 1; consts[ci] = d ~= nil and d[4] or 0.0
+    end
+
     local ps_ok = false
     local ps_err = nil
     local ok_call, err_call = pcall(function()
@@ -852,7 +1611,7 @@ local function fog_frame()
         --------------------------------------------------------
         if P.log_mode and ps_err ~= nil then
             pcall(function()
-                print("@error", "VolumetricFog3D v2.05 シェーダー失敗（CPU予備描画）: " .. tostring(ps_err))
+                print("@error", "VolumetricFog3D v2.06 シェーダー失敗（CPU予備描画）: " .. tostring(ps_err))
             end)
         end
         local gx, gy = 14, 8
@@ -924,25 +1683,25 @@ local function fog_frame()
                 local vmode_str = edit_cam_live and "编辑视角(实时3D)" or (use_sphere and (use_edit_billboard and "编辑视角3D球" or "世界轴3D球") or "摄像机控制")
                 local backend = ps_ok and string.format("GPU(%dx%d)", ATLAS, ATLAS) or "CPU后备"
                 msg = string.format(
-                    "VolumetricFog3D v2.05  %s  视角=%s  切片=%d  顶点=%d  距离=%.0f..%.0f",
+                    "VolumetricFog3D v2.06  %s  视角=%s  切片=%d  顶点=%d  距离=%.0f..%.0f",
                     backend, vmode_str, n_sl, total_v, near_z, near_z + depth_span)
             elseif ui_lang == "de" then
                 local vmode_str = edit_cam_live and "Bearbeitungsansicht(Live3D)" or (use_sphere and (use_edit_billboard and "Bearbeitungsansicht-3DKugel" or "Weltachsen-3DKugel") or "Kamerasteuerung")
                 local backend = ps_ok and string.format("GPU(%dx%d)", ATLAS, ATLAS) or "CPU-Fallback"
                 msg = string.format(
-                    "VolumetricFog3D v2.05  %s  Ansicht=%s  Scheiben=%d  Verts=%d  Distanz=%.0f..%.0f",
+                    "VolumetricFog3D v2.06  %s  Ansicht=%s  Scheiben=%d  Verts=%d  Distanz=%.0f..%.0f",
                     backend, vmode_str, n_sl, total_v, near_z, near_z + depth_span)
             elseif ui_lang == "en" then
                 local vmode_str = edit_cam_live and "EditView(Live3D)" or (use_sphere and (use_edit_billboard and "EditView-3DSphere" or "WorldAxis-3DSphere") or "CameraControl")
                 local backend = ps_ok and string.format("GPU(%dx%d)", ATLAS, ATLAS) or "CPU-Fallback"
                 msg = string.format(
-                    "VolumetricFog3D v2.05  %s  view=%s  slices=%d  verts=%d  dist=%.0f..%.0f",
+                    "VolumetricFog3D v2.06  %s  view=%s  slices=%d  verts=%d  dist=%.0f..%.0f",
                     backend, vmode_str, n_sl, total_v, near_z, near_z + depth_span)
             else
                 local vmode_str = edit_cam_live and "編集視点(実時間3D)" or (use_sphere and (use_edit_billboard and "編集視点3D球" or "世界軸3D球") or "カメラ制御")
                 local backend = ps_ok and string.format("GPU(%dx%d)", ATLAS, ATLAS) or "CPU予備"
                 msg = string.format(
-                    "VolumetricFog3D v2.05  %s  視点=%s  スライス=%d  頂点=%d  距離=%.0f..%.0f",
+                    "VolumetricFog3D v2.06  %s  視点=%s  スライス=%d  頂点=%d  距離=%.0f..%.0f",
                     backend, vmode_str, n_sl, total_v, near_z, near_z + depth_span)
             end
             local now_t = vfog_wall_time_sec()

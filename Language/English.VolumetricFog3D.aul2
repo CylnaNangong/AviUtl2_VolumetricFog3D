@@ -1,11 +1,11 @@
 ;===============================================================
-; Target: VolumetricFog3D v2.05 (VolumetricFog3D.obj2)
+; Target: VolumetricFog3D v2.06 (VolumetricFog3D.obj2)
 ; Language: English
 ; Place this file in  C:\ProgramData\aviutl2\Language\\
 ;===============================================================
 
 [Language]
-Information=VolumetricFog3D v2.05 English Language Pack
+Information=VolumetricFog3D v2.06 English Language Pack
 SubLanguage=English
 
 [Effect]
@@ -44,6 +44,9 @@ VolumetricFog3D=Volumetric Fog (3D)
 光の向きX=Light Dir X
 光の向きY=Light Dir Y
 光の向きZ=Light Dir Z
+散射光来源=Scattering Light Source
+手动方向=Manual Direction
+体积光联动=Link to VolumetricLight3D
 
 ; --- 描画 -> Quality & View ---
 描画=Quality & View
@@ -80,6 +83,9 @@ effect.name=True continuous 3D volumetric fog object using a GPU 4-octave fBm de
 光の向きX=X component of light direction vector.
 光の向きY=Y component of light direction vector.
 光の向きZ=Z component of light direction vector.
+散射光来源=Choose a fixed manual scattering direction or read the current scene’s shared VolumetricLight3D field. Link mode uses local light color, beam direction, and projected shadows. If no fresh field is available, it falls back to manual mode.
+手动方向=Use the X/Y/Z controls below for a fixed scattering direction.
+体积光联动=Sample the current scene’s VolumetricLight3D field, local color, and shadows. Place the VolumetricLight3D layer before this fog layer for same-frame updates.
 スライス数=Number of 3D depth slices integrated across the volume (8-64; 48 default for smooth depth).
 テクスチャ品質=GPU atlas resolution (Standard = 2048 atlas, Lightweight 1/2 = fast 1024 atlas).
 視点追従=Auto uses camera-frustum slices in Camera View and seamlessly switches to a 3D spherical volume in Edit View so orbiting never shows flat edges.

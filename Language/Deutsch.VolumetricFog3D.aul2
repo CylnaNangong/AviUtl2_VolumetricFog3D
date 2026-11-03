@@ -1,11 +1,11 @@
 ;===============================================================
-; Target: VolumetricFog3D v2.05 (VolumetricFog3D.obj2)
+; Target: VolumetricFog3D v2.06 (VolumetricFog3D.obj2)
 ; Language: Deutsch
 ; Place this file in  C:\ProgramData\aviutl2\Language\\
 ;===============================================================
 
 [Language]
-Information=VolumetricFog3D v2.05 Sprachpaket Deutsch
+Information=VolumetricFog3D v2.06 Sprachpaket Deutsch
 SubLanguage=English
 
 [Effect]
@@ -44,6 +44,9 @@ VolumetricFog3D=Volumennebel (3D)
 光の向きX=Lichtrichtung X
 光の向きY=Lichtrichtung Y
 光の向きZ=Lichtrichtung Z
+散射光来源=Streuquelle
+手动方向=Manuelle Richtung
+体积光联动=Mit VolumetricLight3D koppeln
 
 ; --- 描画 -> Qualität & Ansicht ---
 描画=Qualität & Ansicht
@@ -80,6 +83,9 @@ effect.name=Echtes kontinuierliches 3D-Volumennebel-Objekt mit GPU-4-Oktaven-fBm
 光の向きX=X-Komponente des Lichtrichtungsvektors.
 光の向きY=Y-Komponente des Lichtrichtungsvektors.
 光の向きZ=Z-Komponente des Lichtrichtungsvektors.
+散射光来源=Wählen Sie eine feste manuelle Streurichtung oder das gemeinsame VolumetricLight3D-Lichtfeld der aktuellen Szene. Der Kopplungsmodus berücksichtigt lokale Lichtfarbe, Strahlrichtung und projizierte Schatten. Fehlt ein aktuelles Lichtfeld, wird automatisch der manuelle Modus verwendet.
+手动方向=Verwendet die X/Y/Z-Regler unten für eine feste Streurichtung.
+体积光联动=Abtastung des aktuellen VolumetricLight3D-Lichtfelds mit lokaler Farbe und Schatten. Für Aktualisierung im selben Frame die VolumetricLight3D-Ebene oberhalb dieser Nebelebene platzieren.
 スライス数=Anzahl der 3D-Tiefenscheiben (8–64; Standard 48 für weiche Übergänge).
 テクスチャ品質=GPU-Atlasauflösung (Standard = 2048er-Atlas, Leicht 1/2 = schneller 1024er-Atlas).
 視点追従=Auto nutzt im Kameramodus Sichtkegel-Scheiben und wechselt in der Bearbeitungsansicht automatisch auf ein 3D-Kugelvolumen ohne Schnittkanten.
